@@ -1,0 +1,12 @@
+bin/
+obj/
+*.user
+.vs/
+*.suo
+*.userosscache
+*.sln.docstates
+
+publish/
+installer/*.wixpdb
+installer/bin/
+installer/obj/
