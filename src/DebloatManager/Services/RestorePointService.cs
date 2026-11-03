@@ -4,28 +4,43 @@ namespace DebloatManager.Services;
 
 public sealed class RestorePointService
 {
-    public async Task<OperationResult> CreateRestorePointAsync(string description)
-    {
-        var script = $$"""
+    public const string Script = """
+        $ErrorActionPreference = 'Stop'
+        $key = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore'
+        $value = 'SystemRestorePointCreationFrequency'
+        $previous = (Get-ItemProperty -Path $key -Name $value -ErrorAction SilentlyContinue).$value
+
+        function Get-LatestSequence {
+            $latest = Get-ComputerRestorePoint -ErrorAction SilentlyContinue | Sort-Object SequenceNumber | Select-Object -Last 1
+            if ($latest) { [int]$latest.SequenceNumber } else { 0 }
+        }
+
         try {
-            Enable-ComputerRestore -Drive "$env:SystemDrive\" -ErrorAction SilentlyContinue
-            Checkpoint-Computer -Description "{{description}}" -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop
-            Write-Output "OK"
-        } catch {
-            Write-Output "ERROR: $($_.Exception.Message)"
+            Enable-ComputerRestore -Drive "$env:SystemDrive\"
+            $before = Get-LatestSequence
+
+            # Windows silently skips new restore points within 24 hours unless this limit is lifted.
+            Set-ItemProperty -Path $key -Name $value -Value 0 -Type DWord
+            Checkpoint-Computer -Description 'DebloatManager checkpoint' -RestorePointType 'MODIFY_SETTINGS'
+
+            if ((Get-LatestSequence) -gt $before) { 'OK' } else { 'ERROR: Windows did not create the restore point.' }
+        }
+        catch { "ERROR: $($_.Exception.Message)" }
+        finally {
+            if ($null -eq $previous) { Remove-ItemProperty -Path $key -Name $value -ErrorAction SilentlyContinue }
+            else { Set-ItemProperty -Path $key -Name $value -Value $previous -Type DWord -ErrorAction SilentlyContinue }
         }
         """;
 
-        var (success, output, error) = await PowerShellRunner.RunScriptAsync(script);
+    public async Task<OperationResult> CreateAsync()
+    {
+        var result = await PowerShellRunner.RunAsync(Script);
+        var line = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? string.Empty;
 
-        if (success && output.StartsWith("OK"))
-        {
-            return OperationResult.Ok("System restore point created.");
-        }
+        if (line == "OK") return OperationResult.Ok("Restore point created and verified.");
 
-        var reason = output.StartsWith("ERROR:") ? output[6..].Trim() : (string.IsNullOrWhiteSpace(error) ? output : error);
-        return OperationResult.Fail(string.IsNullOrWhiteSpace(reason)
-            ? "Failed to create a restore point. Windows may only allow one restore point every 24 hours."
-            : reason);
+        return OperationResult.Fail(line.StartsWith("ERROR:", StringComparison.Ordinal)
+            ? line[6..].Trim()
+            : result.FailureText("Windows did not create the restore point. System Protection may be turned off."));
     }
 }

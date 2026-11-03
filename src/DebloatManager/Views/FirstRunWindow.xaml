@@ -1,0 +1,43 @@
+<ui:FluentWindow x:Class="DebloatManager.Views.FirstRunWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="Before you start" Width="600" Height="500" ResizeMode="NoResize"
+                 WindowStartupLocation="CenterScreen" WindowBackdropType="None"
+                 ExtendsContentIntoTitleBar="True" Icon="/Assets/app.ico"
+                 Background="{StaticResource WindowBrush}">
+    <DockPanel>
+        <ui:TitleBar DockPanel.Dock="Top" Title="Before you start" ShowMinimize="False" ShowMaximize="False" />
+
+        <DockPanel DockPanel.Dock="Bottom" Margin="20,0,20,20" LastChildFill="False">
+            <ui:Button Content="Read documents" Click="OnReadDocuments" />
+            <ui:Button x:Name="ContinueButton" DockPanel.Dock="Right" Content="Continue" Appearance="Primary"
+                       IsEnabled="{Binding IsChecked, ElementName=AcceptCheck}" Margin="8,0,0,0" Click="OnContinue" />
+            <ui:Button DockPanel.Dock="Right" Content="Exit" IsCancel="True" Click="OnExit" />
+        </DockPanel>
+
+        <CheckBox x:Name="AcceptCheck" DockPanel.Dock="Bottom" Margin="20,0,20,16"
+                  Content="I have read and accept the EULA, Terms of Use and Privacy Policy" />
+
+        <StackPanel Margin="20,8,20,16">
+            <TextBlock Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" Margin="0,0,0,12"
+                       Text="DebloatManager permanently removes software and changes Windows settings with administrator rights." />
+            <TextBlock Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" Margin="0,0,0,6" Text="What can go wrong" />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,4"
+                       Text="- Removed apps lose their data and may be hard to get back." />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,4"
+                       Text="- Windows features or other apps can stop working." />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,4"
+                       Text="- System Restore does not reliably bring back Store apps." />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,12"
+                       Text="- Windows updates may reinstall some apps or reset services." />
+            <TextBlock Foreground="{StaticResource TextBrush}" FontWeight="SemiBold" Margin="0,0,0,6" Text="What you should do" />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,4"
+                       Text="- Back up important files before you start." />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,4"
+                       Text="- Do not use this on a work or school PC without permission." />
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap"
+                       Text="- Read each item's risk level. You are responsible for what you remove." />
+        </StackPanel>
+    </DockPanel>
+</ui:FluentWindow>

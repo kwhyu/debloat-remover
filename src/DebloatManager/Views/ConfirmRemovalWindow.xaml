@@ -1,0 +1,64 @@
+<ui:FluentWindow x:Class="DebloatManager.Views.ConfirmRemovalWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 Title="Confirm changes" Width="680" Height="680" MinWidth="520" MinHeight="480"
+                 WindowStartupLocation="CenterOwner" WindowBackdropType="None"
+                 ExtendsContentIntoTitleBar="True" ShowInTaskbar="False"
+                 Background="{StaticResource WindowBrush}">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Window.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="Confirm changes" ShowMinimize="False" ShowMaximize="False" />
+
+        <TextBlock Grid.Row="1" x:Name="Summary" Margin="16,4,16,10" TextWrapping="Wrap" Foreground="{StaticResource TextBrush}" />
+
+        <ListBox Grid.Row="2" x:Name="ItemList" Margin="16,0" Background="{StaticResource PanelBrush}"
+                 BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="4,3">
+                        <TextBlock Foreground="{StaticResource TextBrush}" TextTrimming="CharacterEllipsis">
+                            <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" />
+                            <Run Text="{Binding Risk, Mode=OneWay}" Foreground="{StaticResource MutedTextBrush}" />
+                        </TextBlock>
+                        <TextBlock Text="{Binding RiskSummary}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding RecoveryHint}" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <StackPanel Grid.Row="3" Margin="16,12,16,0">
+            <TextBlock Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,8"
+                       Text="Running copies are closed without saving. Store app data is deleted." />
+            <StackPanel x:Name="CleanupPanel" Margin="0,0,0,8">
+                <TextBlock Text="After uninstalling programs" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,2" />
+                <RadioButton x:Name="KeepFilesOption" GroupName="Cleanup" IsChecked="True" Content="Leave remaining files and folders" />
+                <RadioButton x:Name="CleanFilesOption" GroupName="Cleanup" Content="Delete remaining folders and everything in them (cannot be undone)" />
+                <ScrollViewer MaxHeight="96" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0"
+                              Visibility="{Binding IsChecked, ElementName=CleanFilesOption, Converter={StaticResource BoolToVisibility}}">
+                    <TextBlock x:Name="FolderList" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="Wrap" />
+                </ScrollViewer>
+            </StackPanel>
+            <CheckBox x:Name="RestorePointCheck" IsChecked="True" Content="Create a restore point first (recommended)" />
+            <CheckBox x:Name="AcknowledgeCheck" Margin="0,4,0,0"
+                      Content="I understand Risky or Unknown items may break Windows or other apps" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="16">
+            <ui:Button Content="Cancel" Margin="0,0,8,0" IsCancel="True" Click="OnCancel" />
+            <ui:Button x:Name="ConfirmButton" Appearance="Primary" Click="OnConfirm" />
+        </StackPanel>
+    </Grid>
+</ui:FluentWindow>
