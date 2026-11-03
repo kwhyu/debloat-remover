@@ -4,6 +4,7 @@ public enum RiskLevel
 {
     Safe,
     Caution,
+    Unknown,
     Risky,
-    Unknown
+    Protected
 }

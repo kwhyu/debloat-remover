@@ -5,17 +5,18 @@ namespace DebloatManager.Services;
 
 public sealed class FileLogService
 {
-    public string LogDirectory { get; }
+    private const int RetentionDays = 30;
+
     private readonly string logFilePath;
+
+    public string LogDirectory { get; }
 
     public FileLogService()
     {
-        LogDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "DebloatManager", "logs");
-
+        LogDirectory = Path.Combine(AppPaths.DataDirectory, "logs");
         Directory.CreateDirectory(LogDirectory);
         logFilePath = Path.Combine(LogDirectory, $"debloatmanager-{DateTime.Now:yyyy-MM-dd}.log");
+        DeleteOldLogs();
     }
 
     public void Append(string message)
@@ -24,18 +25,26 @@ public sealed class FileLogService
         {
             File.AppendAllText(logFilePath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Best-effort logging; disk/IO failures should not crash the app.
+            // A failed log write must never interrupt a removal.
         }
     }
 
-    public void OpenLogFolder()
+    public void OpenLogFolder() => Process.Start(new ProcessStartInfo { FileName = LogDirectory, UseShellExecute = true });
+
+    private void DeleteOldLogs()
     {
-        Process.Start(new ProcessStartInfo
+        foreach (var file in Directory.EnumerateFiles(LogDirectory, "debloatmanager-*.log"))
         {
-            FileName = LogDirectory,
-            UseShellExecute = true
-        });
+            try
+            {
+                if (File.GetLastWriteTime(file) < DateTime.Now.AddDays(-RetentionDays)) File.Delete(file);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Old logs can be removed on a later run.
+            }
+        }
     }
 }

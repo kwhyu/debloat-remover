@@ -1,258 +1,262 @@
+using System.IO.Enumeration;
 using DebloatManager.Models;
 
 namespace DebloatManager.Services;
 
-public sealed record CatalogEntry(string Keyword, string Category, RiskLevel Risk, string Notes);
+public sealed record CatalogEntry(string Pattern, string Category, RiskLevel Risk, string Notes, string? DisplayName = null);
+
+public sealed record SystemEntry(string DisplayName, string Category, RiskLevel Risk, string Notes);
 
 public static class BloatwareCatalog
 {
-    // Keyword is matched case-insensitively against package family name / display name / publisher.
-    public static readonly List<CatalogEntry> Entries = new()
+    private const string Core = "Windows core";
+    private const string Promo = "Promotional app";
+    private const string MsApp = "Microsoft app";
+    private const string Gaming = "Xbox and gaming";
+    private const string Oem = "Manufacturer software";
+    private const string Media = "Media app";
+    private const string SelfInstalled = "May be preinstalled, or installed by you.";
+    private const string NonRemovable = "Marked non-removable by Windows.";
+
+    // Patterns are matched against the full package name, first match wins.
+    public static readonly IReadOnlyList<CatalogEntry> StoreApps = new CatalogEntry[]
     {
-        // Xbox & gaming
-        new("Xbox", "Xbox & Gaming", RiskLevel.Safe, "Xbox companion app, safe to remove if you don't use Xbox services."),
-        new("GamingApp", "Xbox & Gaming", RiskLevel.Safe, "Xbox Gaming app."),
-        new("XboxGameOverlay", "Xbox & Gaming", RiskLevel.Safe, "Xbox in-game overlay."),
-        new("XboxGamingOverlay", "Xbox & Gaming", RiskLevel.Safe, "Xbox Game Bar overlay."),
-        new("XboxIdentityProvider", "Xbox & Gaming", RiskLevel.Caution, "Used for Xbox sign-in, some games depend on it."),
-        new("XboxSpeechToTextOverlay", "Xbox & Gaming", RiskLevel.Safe, "Xbox accessibility overlay."),
-        new("Xbox.TCUI", "Xbox & Gaming", RiskLevel.Caution, "Xbox game chat UI component."),
-        new("MicrosoftSolitaireCollection", "Games", RiskLevel.Safe, "Preinstalled Solitaire game."),
-        new("CandyCrush", "Games", RiskLevel.Safe, "Third-party promotional game."),
-        new("MarchofEmpires", "Games", RiskLevel.Safe, "Third-party promotional game."),
-        new("Disney", "Games", RiskLevel.Safe, "Third-party promotional game."),
-        new("BubbleWitch", "Games", RiskLevel.Safe, "Third-party promotional game."),
-        new("RoyalRevolt", "Games", RiskLevel.Safe, "Third-party promotional game."),
-        new("AsphaltNitro", "Games", RiskLevel.Safe, "Third-party promotional game."),
-        new("Asphalt8", "Games", RiskLevel.Safe, "Third-party promotional game."),
-        new("HiddenCity", "Games", RiskLevel.Safe, "Third-party promotional game."),
-        new("MinecraftUWP", "Games", RiskLevel.Caution, "Minecraft for Windows, keep if you play it."),
+        new("Microsoft.SecHealthUI", Core, RiskLevel.Protected, "The Windows Security interface.", "Windows Security"),
+        new("Microsoft.UI.Xaml*", Core, RiskLevel.Protected, "UI framework used by many apps."),
+        new("Microsoft.VCLibs*", Core, RiskLevel.Protected, "Runtime library used by many apps."),
+        new("Microsoft.NET.*", Core, RiskLevel.Protected, ".NET runtime used by many apps."),
 
-        // Assistant / info apps
-        new("549981C3F5F10", "Assistant", RiskLevel.Caution, "Cortana assistant."),
-        new("Cortana", "Assistant", RiskLevel.Caution, "Cortana assistant."),
-        new("Microsoft.Copilot", "Assistant", RiskLevel.Caution, "Windows Copilot app."),
-        new("BingWeather", "Info & News", RiskLevel.Safe, "Weather widget app."),
-        new("BingNews", "Info & News", RiskLevel.Safe, "News app."),
-        new("BingFinance", "Info & News", RiskLevel.Safe, "Finance app."),
-        new("BingSports", "Info & News", RiskLevel.Safe, "Sports app."),
-        new("GetHelp", "System Utility", RiskLevel.Safe, "Redirects to Microsoft support site."),
-        new("Getstarted", "System Utility", RiskLevel.Safe, "Windows tips app."),
-        new("MicrosoftTips", "System Utility", RiskLevel.Safe, "Windows tips app."),
-        new("WindowsFeedbackHub", "System Utility", RiskLevel.Safe, "Feedback reporting tool."),
-        new("MixedReality.Portal", "Extended Reality", RiskLevel.Safe, "Mixed Reality portal, only needed for VR headsets."),
-        new("3DBuilder", "Creativity", RiskLevel.Safe, "3D modeling app."),
-        new("Print3D", "Creativity", RiskLevel.Safe, "3D printing companion app."),
-        new("Microsoft3DViewer", "Creativity", RiskLevel.Safe, "3D model viewer."),
-        new("OneConnect", "Connectivity", RiskLevel.Safe, "Mobile plans app, rarely used on desktops."),
-        new("Wallet", "Connectivity", RiskLevel.Safe, "Microsoft Wallet, mostly unused."),
-        new("WebExperience", "System Utility", RiskLevel.Caution, "Widgets board (Windows 11 Widgets)."),
-        new("Family", "System Utility", RiskLevel.Safe, "Microsoft Family Safety app."),
-        new("QuickAssist", "System Utility", RiskLevel.Safe, "Remote assistance app, rarely used by most users."),
-        new("RemoteDesktop", "System Utility", RiskLevel.Caution, "Microsoft Remote Desktop client."),
-        new("WindowsTerminal", "System Utility", RiskLevel.Caution, "Windows Terminal app, keep if you use the command line."),
-        new("DevHome", "System Utility", RiskLevel.Caution, "Dev Home, mainly useful for developers."),
+        new("Microsoft.WindowsStore", Core, RiskLevel.Risky, "Without it you cannot install or update Store apps, and it is hard to bring back.", "Microsoft Store"),
+        new("Microsoft.StorePurchaseApp", Core, RiskLevel.Risky, "Handles purchases in the Microsoft Store.", "Store Purchase"),
+        new("Microsoft.DesktopAppInstaller", Core, RiskLevel.Risky, "Provides winget and .appx installation.", "App Installer"),
+        new("*WinAppRuntime*", Core, RiskLevel.Risky, "Runtime that other apps need in order to start.", "Windows App Runtime"),
+        new("Microsoft.WindowsAppRuntime*", Core, RiskLevel.Risky, "Runtime that other apps need in order to start.", "Windows App Runtime"),
+        new("Microsoft.MicrosoftEdge.Stable", Core, RiskLevel.Risky, "Edge integration package. Web content in Windows and other apps can break.", "Microsoft Edge"),
+        new("MicrosoftCorporationII.WindowsSubsystemForLinux", Core, RiskLevel.Risky, "WSL. Linux distributions stop working.", "Windows Subsystem for Linux"),
+        new("Microsoft.XboxGameCallableUI", Gaming, RiskLevel.Risky, NonRemovable + " Xbox sign-in dialogs in games can break.", "Xbox Game UI"),
+        new("Microsoft.Windows.ContentDeliveryManager", Core, RiskLevel.Risky, NonRemovable + " Delivers suggested apps and Spotlight content.", "Content Delivery Manager"),
+        new("Microsoft.Windows.ParentalControls", Core, RiskLevel.Risky, NonRemovable + " Family Safety limits stop working.", "Parental Controls"),
+        new("Microsoft.Windows.NarratorQuickStart", Core, RiskLevel.Risky, NonRemovable + " Narrator tutorial.", "Narrator Quick Start"),
+        new("Microsoft.Windows.PeopleExperienceHost", Core, RiskLevel.Risky, NonRemovable + " Taskbar contacts.", "People Experience Host"),
+        new("Microsoft.MicrosoftEdgeDevToolsClient", Core, RiskLevel.Risky, NonRemovable + " Edge developer tools.", "Edge DevTools Client"),
+        new("Microsoft.Windows.XGpuEjectDialog", Core, RiskLevel.Risky, NonRemovable + " External graphics eject dialog.", "External GPU Dialog"),
 
-        // Communication / productivity
-        new("People", "Communication", RiskLevel.Caution, "Contacts hub used by Mail app."),
-        new("SkypeApp", "Communication", RiskLevel.Safe, "Skype UWP client."),
-        new("YourPhone", "Communication", RiskLevel.Caution, "Phone Link, keep if you sync with an Android phone."),
-        new("MicrosoftTeams", "Communication", RiskLevel.Caution, "Teams consumer app, preinstalled since Windows 11."),
-        new("Teams", "Communication", RiskLevel.Caution, "Microsoft Teams chat icon integration."),
-        new("Todos", "Productivity", RiskLevel.Caution, "Microsoft To Do app."),
-        new("MicrosoftStickyNotes", "Productivity", RiskLevel.Caution, "Sticky Notes app."),
-        new("MicrosoftOfficeHub", "Productivity", RiskLevel.Safe, "Office promotional shortcut app, not Office itself."),
-        new("Office.OneNote", "Productivity", RiskLevel.Caution, "OneNote UWP client, keep if you use OneNote."),
-        new("OutlookForWindows", "Productivity", RiskLevel.Caution, "New Outlook client."),
-        new("PowerAutomateDesktop", "Productivity", RiskLevel.Caution, "Automation tool, keep if used."),
-        new("Clipchamp", "Creativity", RiskLevel.Safe, "Preinstalled video editor."),
-        new("MicrosoftWhiteboard", "Productivity", RiskLevel.Safe, "Digital whiteboard app."),
-        new("MSPaint", "Creativity", RiskLevel.Caution, "Modern Paint app."),
-        new("ScreenSketch", "Creativity", RiskLevel.Caution, "Snip & Sketch screenshot tool."),
-        new("OneDrive", "Productivity", RiskLevel.Caution, "Cloud storage sync client, keep if you use OneDrive backup."),
+        new("Microsoft.BingNews", Promo, RiskLevel.Safe, "News app.", "News"),
+        new("Microsoft.BingWeather", Promo, RiskLevel.Safe, "Weather app.", "Weather"),
+        new("Microsoft.BingFinance", Promo, RiskLevel.Safe, "Finance app.", "Finance"),
+        new("Microsoft.BingSports", Promo, RiskLevel.Safe, "Sports app.", "Sports"),
+        new("Microsoft.GetHelp", Promo, RiskLevel.Safe, "Opens Microsoft support.", "Get Help"),
+        new("Microsoft.Getstarted", Promo, RiskLevel.Safe, "Windows tips.", "Tips"),
+        new("Microsoft.MicrosoftOfficeHub", Promo, RiskLevel.Safe, "Shortcut app that promotes Microsoft 365. It is not Office itself.", "Microsoft 365 Hub"),
+        new("Microsoft.MicrosoftSolitaireCollection", Promo, RiskLevel.Safe, "Solitaire games with ads.", "Solitaire Collection"),
+        new("Microsoft.MixedReality.Portal", Promo, RiskLevel.Safe, "Only needed for VR headsets.", "Mixed Reality Portal"),
+        new("Microsoft.3DBuilder", Promo, RiskLevel.Safe, "3D modelling app.", "3D Builder"),
+        new("Microsoft.Print3D", Promo, RiskLevel.Safe, "3D printing companion.", "Print 3D"),
+        new("Microsoft.Microsoft3DViewer", Promo, RiskLevel.Safe, "3D model viewer.", "3D Viewer"),
+        new("Microsoft.OneConnect", Promo, RiskLevel.Safe, "Mobile plans app.", "Mobile Plans"),
+        new("Microsoft.Messaging", Promo, RiskLevel.Safe, "Retired messaging app.", "Messaging"),
+        new("Microsoft.Wallet", Promo, RiskLevel.Safe, "Retired Microsoft Wallet.", "Wallet"),
+        new("Microsoft.WindowsFeedbackHub", Promo, RiskLevel.Safe, "Sends feedback to Microsoft.", "Feedback Hub"),
+        new("Microsoft.WindowsMaps", Promo, RiskLevel.Safe, "Maps app.", "Maps"),
+        new("Microsoft.ZuneVideo", Promo, RiskLevel.Safe, "Movies and TV app.", "Movies & TV"),
+        new("Microsoft.SkypeApp", Promo, RiskLevel.Safe, "Retired Skype client.", "Skype"),
+        new("Clipchamp.Clipchamp", Promo, RiskLevel.Safe, "Preinstalled video editor.", "Clipchamp"),
+        new("*CandyCrush*", Promo, RiskLevel.Safe, "Promotional game."),
+        new("*BubbleWitch*", Promo, RiskLevel.Safe, "Promotional game."),
+        new("*MarchofEmpires*", Promo, RiskLevel.Safe, "Promotional game."),
+        new("*RoyalRevolt*", Promo, RiskLevel.Safe, "Promotional game."),
+        new("*AsphaltNitro*", Promo, RiskLevel.Safe, "Promotional game."),
+        new("*Asphalt8*", Promo, RiskLevel.Safe, "Promotional game."),
+        new("*HiddenCity*", Promo, RiskLevel.Safe, "Promotional game."),
+        new("*EclipseManager*", Promo, RiskLevel.Safe, "Promotional app."),
+        new("*PhototasticCollage*", Promo, RiskLevel.Safe, "Promotional app."),
+        new("*AutodeskSketchBook*", Promo, RiskLevel.Safe, "Promotional app."),
 
-        // Media
-        new("ZuneMusic", "Media", RiskLevel.Safe, "Groove Music / Media Player app."),
-        new("ZuneVideo", "Media", RiskLevel.Safe, "Movies & TV app."),
-        new("WindowsMaps", "Media", RiskLevel.Safe, "Offline maps app."),
-        new("Spotify", "Media", RiskLevel.Safe, "Preinstalled third-party Spotify shortcut."),
-        new("TikTok", "Media", RiskLevel.Safe, "Preinstalled third-party app."),
-        new("Netflix", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("Facebook", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("Instagram", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("PandoraMediaInc", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("Hulu", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("iHeartRadio", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("Flipboard", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("Twitter", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("LinkedInforWindows", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("Duolingo", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("PhototasticCollage", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("PicsArt-PhotoStudio", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("AutodeskSketchBook", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
-        new("EclipseManager", "Media", RiskLevel.Safe, "Preinstalled third-party app shortcut."),
+        new("SpotifyAB.SpotifyMusic", Media, RiskLevel.Caution, SelfInstalled, "Spotify"),
+        new("*TikTok*", Media, RiskLevel.Caution, SelfInstalled),
+        new("*Netflix*", Media, RiskLevel.Caution, SelfInstalled),
+        new("Facebook.*", Media, RiskLevel.Caution, SelfInstalled),
+        new("*Disney*", Media, RiskLevel.Caution, SelfInstalled),
+        new("*LinkedInforWindows*", Media, RiskLevel.Caution, SelfInstalled),
+        new("Microsoft.MinecraftUWP", Gaming, RiskLevel.Caution, "Keep it if you play Minecraft.", "Minecraft"),
 
-        // OEM trialware and utilities
-        new("McAfee", "Third-Party Trialware", RiskLevel.Safe, "OEM trial antivirus, safe to remove if using Windows Defender."),
-        new("Norton", "Third-Party Trialware", RiskLevel.Safe, "OEM trial antivirus."),
-        new("WildTangent", "Third-Party Trialware", RiskLevel.Safe, "Game trial platform."),
-        new("Booking.com", "Third-Party Trialware", RiskLevel.Safe, "Preinstalled promotional app."),
-        new("TripAdvisor", "Third-Party Trialware", RiskLevel.Safe, "Preinstalled promotional app."),
-        new("ExpressVPN", "Third-Party Trialware", RiskLevel.Safe, "Preinstalled VPN trial."),
-        new("AmazonAssistant", "Third-Party Trialware", RiskLevel.Safe, "Amazon shopping assistant."),
-        new("Amazon.com", "Third-Party Trialware", RiskLevel.Safe, "Preinstalled Amazon shortcut."),
-        new("eBay", "Third-Party Trialware", RiskLevel.Safe, "Preinstalled eBay shortcut."),
-        new("DropboxOEM", "Third-Party Trialware", RiskLevel.Safe, "Preinstalled Dropbox promotion."),
-        new("WPSOffice", "Third-Party Trialware", RiskLevel.Safe, "Third-party office suite trial."),
-        new("CyberLink", "Third-Party Trialware", RiskLevel.Safe, "OEM media/DVD software trial."),
+        new("Microsoft.XboxSpeechToTextOverlay", Gaming, RiskLevel.Safe, "Xbox speech overlay.", "Xbox Speech Overlay"),
+        new("Microsoft.GamingApp", Gaming, RiskLevel.Safe, "The Xbox app.", "Xbox"),
+        new("Microsoft.XboxApp", Gaming, RiskLevel.Safe, "Old Xbox Console Companion.", "Xbox Console Companion"),
+        new("Microsoft.XboxGamingOverlay", Gaming, RiskLevel.Caution, "Game Bar. Some games show a popup without it.", "Xbox Game Bar"),
+        new("Microsoft.XboxGameOverlay", Gaming, RiskLevel.Caution, "In-game overlay used by Game Bar.", "Xbox Game Overlay"),
+        new("Microsoft.XboxIdentityProvider", Gaming, RiskLevel.Caution, "Xbox sign-in, needed by Xbox-connected games.", "Xbox Identity Provider"),
+        new("Microsoft.Xbox.TCUI", Gaming, RiskLevel.Caution, "Xbox friends and party UI.", "Xbox TCUI"),
+        new("Microsoft.GamingServices", Gaming, RiskLevel.Caution, "Required by Game Pass and Store games.", "Gaming Services"),
 
-        // Dell
-        new("DellSupportAssist", "OEM Utility", RiskLevel.Caution, "Dell hardware diagnostics, useful for warranty support."),
-        new("DellDigitalDelivery", "OEM Utility", RiskLevel.Safe, "Dell software delivery tool."),
-        new("DellCustomerConnect", "OEM Utility", RiskLevel.Safe, "Dell registration prompt."),
-        new("DellOptimizer", "OEM Utility", RiskLevel.Caution, "Dell performance tuning tool."),
-        new("DellUpdate", "OEM Utility", RiskLevel.Caution, "Dell driver update tool."),
-        new("DellMobileConnect", "OEM Utility", RiskLevel.Safe, "Dell phone-to-PC companion app."),
+        new("Microsoft.549981C3F5F10", MsApp, RiskLevel.Caution, "Cortana assistant.", "Cortana"),
+        new("Microsoft.Copilot", MsApp, RiskLevel.Caution, "Copilot app.", "Copilot"),
+        new("Microsoft.Windows.Ai.Copilot.Provider", MsApp, RiskLevel.Caution, "Copilot integration.", "Copilot Provider"),
+        new("Microsoft.BingSearch", MsApp, RiskLevel.Caution, "Web results in Windows Search.", "Bing Search"),
+        new("Microsoft.BingTranslator", MsApp, RiskLevel.Caution, "Translator app.", "Translator"),
+        new("Microsoft.People", MsApp, RiskLevel.Caution, "Contacts, used by the Mail app.", "People"),
+        new("microsoft.windowscommunicationsapps", MsApp, RiskLevel.Caution, "Mail and Calendar.", "Mail and Calendar"),
+        new("Microsoft.OutlookForWindows", MsApp, RiskLevel.Caution, "New Outlook.", "Outlook"),
+        new("MSTeams", MsApp, RiskLevel.Caution, "Microsoft Teams.", "Teams"),
+        new("MicrosoftTeams", MsApp, RiskLevel.Caution, "Microsoft Teams.", "Teams"),
+        new("Microsoft.YourPhone", MsApp, RiskLevel.Caution, "Phone Link.", "Phone Link"),
+        new("MicrosoftWindows.CrossDevice", MsApp, RiskLevel.Caution, "Connects Windows to your phone.", "Cross Device"),
+        new("Microsoft.Todos", MsApp, RiskLevel.Caution, "To Do.", "To Do"),
+        new("Microsoft.MicrosoftStickyNotes", MsApp, RiskLevel.Caution, "Notes stay synced only if you signed in.", "Sticky Notes"),
+        new("Microsoft.Office.OneNote", MsApp, RiskLevel.Caution, "OneNote.", "OneNote"),
+        new("Microsoft.PowerAutomateDesktop", MsApp, RiskLevel.Caution, "Automation tool.", "Power Automate"),
+        new("Microsoft.Whiteboard", MsApp, RiskLevel.Caution, "Whiteboard.", "Whiteboard"),
+        new("Microsoft.MicrosoftJournal", MsApp, RiskLevel.Caution, "Journal.", "Journal"),
+        new("Microsoft.Windows.DevHome*", MsApp, RiskLevel.Caution, "Developer dashboard.", "Dev Home"),
+        new("Microsoft.WindowsTerminal", MsApp, RiskLevel.Caution, "Default terminal on Windows 11.", "Terminal"),
+        new("Microsoft.WindowsCalculator", MsApp, RiskLevel.Caution, "Calculator.", "Calculator"),
+        new("Microsoft.WindowsCamera", MsApp, RiskLevel.Caution, "Camera.", "Camera"),
+        new("Microsoft.WindowsNotepad", MsApp, RiskLevel.Caution, "Notepad.", "Notepad"),
+        new("Microsoft.WindowsSoundRecorder", MsApp, RiskLevel.Caution, "Sound Recorder.", "Sound Recorder"),
+        new("Microsoft.WindowsAlarms", MsApp, RiskLevel.Caution, "Clock and alarms.", "Clock"),
+        new("Microsoft.Windows.Photos", MsApp, RiskLevel.Caution, "Default photo viewer.", "Photos"),
+        new("Microsoft.Paint", MsApp, RiskLevel.Caution, "Paint.", "Paint"),
+        new("Microsoft.ScreenSketch", MsApp, RiskLevel.Caution, "Snipping Tool and the Win+Shift+S shortcut.", "Snipping Tool"),
+        new("Microsoft.ZuneMusic", MsApp, RiskLevel.Caution, "Media Player.", "Media Player"),
+        new("MicrosoftCorporationII.QuickAssist", MsApp, RiskLevel.Caution, "Remote help tool.", "Quick Assist"),
+        new("MicrosoftCorporationII.MicrosoftFamily", MsApp, RiskLevel.Caution, "Family Safety.", "Family"),
+        new("MicrosoftWindows.Client.WebExperience", MsApp, RiskLevel.Caution, "Windows 11 Widgets board.", "Widgets"),
+        new("Microsoft.WidgetsPlatformRuntime", MsApp, RiskLevel.Caution, "Runtime for Widgets.", "Widgets Runtime"),
+        new("Microsoft.StartExperiencesApp", MsApp, RiskLevel.Caution, "Start menu recommendations and widgets.", "Start Experiences"),
+        new("Microsoft.Winget.Source", MsApp, RiskLevel.Caution, "Package index used by winget.", "Winget Source"),
+        new("Microsoft.ApplicationCompatibilityEnhancements", MsApp, RiskLevel.Caution, "Improves compatibility of some apps.", "App Compatibility"),
+        new("Microsoft.D3DMappingLayers", MsApp, RiskLevel.Caution, "OpenCL and OpenGL compatibility layer.", "OpenCL and OpenGL Layer"),
+        new("Microsoft.*VideoExtension*", MsApp, RiskLevel.Caution, "Video codec. Some videos may no longer play."),
+        new("Microsoft.*ImageExtension*", MsApp, RiskLevel.Caution, "Image codec. Some photos may no longer open."),
+        new("Microsoft.WebMediaExtensions", MsApp, RiskLevel.Caution, "Web media codecs.", "Web Media Extensions"),
 
-        // HP
-        new("HPJumpStart", "OEM Utility", RiskLevel.Safe, "HP onboarding promotional app."),
-        new("HPSupportAssistant", "OEM Utility", RiskLevel.Caution, "HP hardware diagnostics, useful for warranty support."),
-        new("HPSystemEventUtility", "OEM Utility", RiskLevel.Caution, "HP hotkey and system event handler."),
-        new("HPAudioSwitch", "OEM Utility", RiskLevel.Caution, "HP audio device switcher."),
-        new("HPRegistration", "OEM Utility", RiskLevel.Safe, "HP product registration prompt."),
-        new("myHP", "OEM Utility", RiskLevel.Safe, "HP companion app."),
-
-        // Lenovo
-        new("LenovoVantage", "OEM Utility", RiskLevel.Caution, "Lenovo system management app."),
-        new("LenovoUtility", "OEM Utility", RiskLevel.Caution, "Lenovo hardware utility."),
-        new("LenovoCompanion", "OEM Utility", RiskLevel.Safe, "Lenovo promotional companion app."),
-        new("LenovoWelcome", "OEM Utility", RiskLevel.Safe, "Lenovo onboarding app."),
-        new("LenovoHotkey", "OEM Utility", RiskLevel.Risky, "Lenovo hotkey driver helper, may control fn keys."),
-
-        // Asus
-        new("ASUSLiveUpdate", "OEM Utility", RiskLevel.Caution, "ASUS driver update tool."),
-        new("ASUSSplendidVideoEnhancementTechnology", "OEM Utility", RiskLevel.Safe, "ASUS display color enhancement utility."),
-        new("MyASUS", "OEM Utility", RiskLevel.Caution, "ASUS system management app."),
-        new("ArmourySoftware", "OEM Utility", RiskLevel.Caution, "ASUS ROG gaming utility."),
-
-        // Acer
-        new("AcerCollection", "OEM Utility", RiskLevel.Safe, "Acer app store shortcut."),
-        new("AcerUEIP", "OEM Utility", RiskLevel.Safe, "Acer usage data collector."),
-        new("AcerJumpStart", "OEM Utility", RiskLevel.Safe, "Acer onboarding promotional app."),
-
-        // System / core (do not encourage removal, tag as risky/caution informationally)
-        new("WindowsCalculator", "System Utility", RiskLevel.Caution, "Calculator app."),
-        new("WindowsCamera", "System Utility", RiskLevel.Caution, "Camera app."),
-        new("WindowsSoundRecorder", "System Utility", RiskLevel.Caution, "Voice recorder app."),
-        new("WindowsAlarms", "System Utility", RiskLevel.Caution, "Alarms & Clock app."),
-        new("Windows.Photos", "System Utility", RiskLevel.Caution, "Photos app."),
-        new("WindowsStore", "System Core", RiskLevel.Risky, "Microsoft Store, removing breaks app installs from the Store."),
-        new("SecHealthUI", "System Core", RiskLevel.Risky, "Windows Security UI, removing disables the Defender interface."),
-        new("NcsiUwpApp", "System Core", RiskLevel.Risky, "Network connectivity status indicator."),
-        new("VCLibs", "System Core", RiskLevel.Risky, "Runtime library required by many UWP apps."),
-        new("NET.Native", "System Core", RiskLevel.Risky, ".NET Native runtime required by UWP apps."),
-        new("StartMenuExperienceHost", "System Core", RiskLevel.Risky, "Powers the Start menu, do not remove."),
-        new("ShellExperienceHost", "System Core", RiskLevel.Risky, "Powers Windows shell UI elements, do not remove."),
-        new("PeopleExperienceHost", "System Core", RiskLevel.Risky, "Windows shell contact experience component."),
-        new("ParentalControls", "System Core", RiskLevel.Risky, "Windows Family Safety integration component."),
+        new("*DellSupportAssist*", Oem, RiskLevel.Caution, "Dell diagnostics, useful for warranty support."),
+        new("*DellDigitalDelivery*", Oem, RiskLevel.Safe, "Dell software delivery tool."),
+        new("*DellCustomerConnect*", Oem, RiskLevel.Safe, "Dell registration prompt."),
+        new("*HPJumpStart*", Oem, RiskLevel.Safe, "HP onboarding app."),
+        new("*HPSupportAssistant*", Oem, RiskLevel.Caution, "HP diagnostics, useful for warranty support."),
+        new("*myHP*", Oem, RiskLevel.Caution, "HP companion app."),
+        new("*LenovoCompanion*", Oem, RiskLevel.Safe, "Lenovo companion app."),
+        new("*LenovoVantage*", Oem, RiskLevel.Caution, "Lenovo system settings and updates."),
+        new("*MyASUS*", Oem, RiskLevel.Caution, "ASUS system settings and updates."),
+        new("*ArmouryCrate*", Oem, RiskLevel.Caution, "ASUS fan, lighting and performance control."),
+        new("*AcerCollection*", Oem, RiskLevel.Safe, "Acer app store shortcut."),
+        new("*AcerJumpStart*", Oem, RiskLevel.Safe, "Acer onboarding app."),
+        new("*NVIDIAControlPanel*", Oem, RiskLevel.Caution, "Graphics settings for NVIDIA drivers."),
+        new("*RealtekAudioControl*", Oem, RiskLevel.Caution, "Audio settings for Realtek drivers."),
+        new("*Nahimic*", Oem, RiskLevel.Caution, "Audio enhancement tied to the audio driver."),
     };
 
-    public static CatalogEntry? Match(string identifier)
+    // Patterns are matched against the display name in Apps & Features, first match wins.
+    public static readonly IReadOnlyList<CatalogEntry> Programs = new CatalogEntry[]
     {
-        foreach (var entry in Entries)
+        new("Microsoft Edge WebView2*", Core, RiskLevel.Risky, "Many apps display their interface with it and will not start without it."),
+        new("Microsoft Edge", Core, RiskLevel.Risky, "Web content in Windows and other apps can break. Its uninstaller often refuses to run."),
+        new("Microsoft Update Health Tools", Core, RiskLevel.Risky, "Keeps Windows Update healthy."),
+        new("Microsoft Windows Application Compatibility*", Core, RiskLevel.Risky, "Compatibility fixes for installed programs."),
+        new("Microsoft OneDrive", MsApp, RiskLevel.Caution, "Back up your files first. Files kept only online stay in the cloud but leave this PC."),
+        new("Microsoft Teams*", MsApp, RiskLevel.Caution, "Microsoft Teams."),
+        new("Microsoft 365*", MsApp, RiskLevel.Caution, "Office apps. A licence you paid for stays on your account."),
+        new("Windows PC Health Check", Promo, RiskLevel.Safe, "Windows 11 eligibility checker."),
+        new("WildTangent*", Promo, RiskLevel.Safe, "Trial games."),
+        new("McAfee*", Oem, RiskLevel.Caution, "Antivirus. Check that Microsoft Defender or another antivirus is active afterwards."),
+        new("Norton*", Oem, RiskLevel.Caution, "Antivirus. Check that Microsoft Defender or another antivirus is active afterwards."),
+        new("CyberLink*", Oem, RiskLevel.Caution, "Media software bundled by manufacturers."),
+        new("Dell SupportAssist*", Oem, RiskLevel.Caution, "Dell diagnostics, useful for warranty support."),
+        new("Dell Digital Delivery*", Oem, RiskLevel.Safe, "Dell software delivery tool."),
+        new("HP JumpStart*", Oem, RiskLevel.Safe, "HP onboarding app."),
+        new("HP Support Assistant*", Oem, RiskLevel.Caution, "HP diagnostics, useful for warranty support."),
+        new("Lenovo Vantage*", Oem, RiskLevel.Caution, "Lenovo system settings and updates."),
+        new("ASUS Live Update*", Oem, RiskLevel.Caution, "ASUS driver updates."),
+        new("Acer Collection*", Oem, RiskLevel.Safe, "Acer app store shortcut."),
+    };
+
+    public static readonly IReadOnlyDictionary<string, SystemEntry> Services =
+        new Dictionary<string, SystemEntry>(StringComparer.OrdinalIgnoreCase)
         {
-            if (identifier.Contains(entry.Keyword, StringComparison.OrdinalIgnoreCase))
-            {
-                return entry;
-            }
-        }
+            ["DiagTrack"] = new("Connected User Experiences and Telemetry", "Telemetry", RiskLevel.Caution, "Sends diagnostic data to Microsoft."),
+            ["dmwappushservice"] = new("WAP Push Message Routing", "Telemetry", RiskLevel.Caution, "Used for device management and telemetry."),
+            ["diagsvc"] = new("Diagnostic Execution Service", "Telemetry", RiskLevel.Caution, "Windows troubleshooters use it."),
+            ["WerSvc"] = new("Windows Error Reporting", "Telemetry", RiskLevel.Caution, "Crash reports are no longer collected or sent."),
+            ["RetailDemo"] = new("Retail Demo Service", "Telemetry", RiskLevel.Safe, "Only used on store display units."),
+            ["MapsBroker"] = new("Downloaded Maps Manager", "System utility", RiskLevel.Caution, "Used by the Maps app."),
+            ["XblAuthManager"] = new("Xbox Live Auth Manager", Gaming, RiskLevel.Caution, "Xbox sign-in in games."),
+            ["XblGameSave"] = new("Xbox Live Game Save", Gaming, RiskLevel.Caution, "Cloud saves in Xbox games."),
+            ["XboxNetApiSvc"] = new("Xbox Live Networking", Gaming, RiskLevel.Caution, "Online play in Xbox games."),
+            ["SysMain"] = new("SysMain", "Performance", RiskLevel.Caution, "Preloads apps. Apps can start slower on hard drives."),
+            ["Fax"] = new("Fax", "System utility", RiskLevel.Safe, "Unused on most PCs."),
+            ["WSearch"] = new("Windows Search", "System utility", RiskLevel.Risky, "Start menu and File Explorer search become slow or incomplete."),
+            ["PrintNotify"] = new("Printer Extensions and Notifications", "System utility", RiskLevel.Caution, "Only needed if you print."),
+            ["RemoteRegistry"] = new("Remote Registry", "System utility", RiskLevel.Safe, "Rarely needed, and safer when off."),
+        };
 
-        return null;
-    }
+    public static readonly IReadOnlyDictionary<string, SystemEntry> Features =
+        new Dictionary<string, SystemEntry>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Internet-Explorer-Optional-amd64"] = new("Internet Explorer", "Legacy", RiskLevel.Safe, "Replaced by Edge."),
+            ["WorkFolders-Client"] = new("Work Folders Client", "Legacy", RiskLevel.Safe, "Rarely used at home."),
+            ["Printing-XPSServices-Features"] = new("XPS Services", "Printing", RiskLevel.Safe, "XPS printing support."),
+            ["Printing-PrintToPDFServices-Features"] = new("Microsoft Print to PDF", "Printing", RiskLevel.Caution, "The Save as PDF printer disappears from every app."),
+            ["MediaPlayback"] = new("Media Features", "Media", RiskLevel.Caution, "Media playback used by several apps."),
+            ["WindowsMediaPlayer"] = new("Windows Media Player Legacy", "Media", RiskLevel.Safe, "Replaced by the new Media Player."),
+            ["MicrosoftWindowsPowerShellV2"] = new("Windows PowerShell 2.0 Engine", "Legacy", RiskLevel.Caution, "Very old scripts may need it."),
+            ["MicrosoftWindowsPowerShellV2Root"] = new("Windows PowerShell 2.0", "Legacy", RiskLevel.Caution, "Very old scripts may need it."),
+            ["TelnetClient"] = new("Telnet Client", "Legacy", RiskLevel.Safe, "Rarely used."),
+            ["TFTP"] = new("TFTP Client", "Legacy", RiskLevel.Safe, "Rarely used."),
+            ["LegacyComponents"] = new("Legacy Components", "Legacy", RiskLevel.Caution, "DirectPlay, used by older games."),
+            ["SMB1Protocol"] = new("SMB 1.0 File Sharing", "Legacy", RiskLevel.Caution, "Insecure, but very old NAS devices may need it."),
+            ["Containers-DisposableClientVM"] = new("Windows Sandbox", "Virtualization", RiskLevel.Caution, "Keep it if you test software in isolation."),
+            ["Microsoft-Hyper-V-All"] = new("Hyper-V", "Virtualization", RiskLevel.Risky, "Virtual machines, and some emulators and containers, stop working."),
+            ["NetFx3"] = new(".NET Framework 3.5", "Legacy", RiskLevel.Caution, "Required by some older applications and games."),
+        };
 
-    // Structural fallback rules applied when no curated catalog entry matches, so risk
-    // classification does not depend entirely on a hand-maintained keyword list.
     private static readonly string[] SharedRuntimeKeywords =
     {
-        "Redistributable", "Runtime", " SDK", "DirectX", "WebView2", "Update for Microsoft",
-        "Visual C++", "Security Update", "Driver", ".NET Framework", ".NET Core", ".NET Desktop", "Hotfix"
+        "Redistributable", "Runtime", " SDK", "DirectX", "Visual C++", "Driver", ".NET", "Update for Microsoft"
     };
 
-    public static CatalogEntry? ClassifyUwpFallback(string name, string publisher, bool nonRemovable, string? signatureKind)
+    public static CatalogEntry? ClassifyStoreApp(string packageName, string publisher, bool nonRemovable, string? signatureKind)
     {
-        if (nonRemovable)
+        var match = FindMatch(StoreApps, packageName);
+        if (match is not null) return match;
+
+        var isSystemSigned = string.Equals(signatureKind, "System", StringComparison.OrdinalIgnoreCase);
+        if (nonRemovable && isSystemSigned)
         {
-            return new CatalogEntry(name, "System Core", RiskLevel.Risky,
-                "Windows marks this package as non-removable; removal is blocked or unsupported by the OS.");
+            return new CatalogEntry(packageName, Core, RiskLevel.Protected, "Windows component that Windows itself marks as non-removable.");
         }
 
-        if (string.Equals(signatureKind, "System", StringComparison.OrdinalIgnoreCase))
+        if (nonRemovable || isSystemSigned)
         {
-            return new CatalogEntry(name, "System Core", RiskLevel.Risky,
-                "Digitally signed as a Windows system component.");
+            return new CatalogEntry(packageName, Core, RiskLevel.Risky, "Windows treats this package as a system component.");
         }
 
         if (publisher.Contains("Microsoft", StringComparison.OrdinalIgnoreCase))
         {
-            return new CatalogEntry(name, "Microsoft App", RiskLevel.Caution,
-                "First-party Microsoft app not in the curated bloatware list — review before removing.");
+            return new CatalogEntry(packageName, MsApp, RiskLevel.Caution, "Microsoft app that is not in the catalog. Review it before removing.");
         }
 
         return null;
     }
 
-    public static CatalogEntry? ClassifyWin32Fallback(string displayName, string publisher)
+    public static CatalogEntry? ClassifyProgram(string displayName, string publisher)
     {
+        var match = FindMatch(Programs, displayName);
+        if (match is not null) return match;
+
         if (SharedRuntimeKeywords.Any(keyword => displayName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
         {
-            return new CatalogEntry(displayName, "Shared Runtime / Driver", RiskLevel.Caution,
-                "Other installed applications or hardware drivers may depend on this component.");
+            return new CatalogEntry(displayName, "Runtime or driver", RiskLevel.Caution, "Other programs or your hardware may depend on this.");
         }
 
-        if (publisher.Contains("Microsoft Corporation", StringComparison.OrdinalIgnoreCase))
+        if (publisher.Contains("Microsoft", StringComparison.OrdinalIgnoreCase))
         {
-            return new CatalogEntry(displayName, "Microsoft Program", RiskLevel.Caution,
-                "Microsoft-published program not in the curated list — review before removing.");
+            return new CatalogEntry(displayName, MsApp, RiskLevel.Caution, "Microsoft program that is not in the catalog. Review it before removing.");
         }
 
         return null;
     }
 
-    // Known telemetry / diagnostics services commonly targeted by debloat tools.
-    public static readonly Dictionary<string, (string Category, RiskLevel Risk, string Notes)> KnownServices = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["DiagTrack"] = ("Telemetry", RiskLevel.Caution, "Connected User Experiences and Telemetry service."),
-        ["dmwappushservice"] = ("Telemetry", RiskLevel.Caution, "WAP push message routing service, used for telemetry."),
-        ["diagsvc"] = ("Telemetry", RiskLevel.Caution, "Diagnostic Execution Service."),
-        ["WerSvc"] = ("Telemetry", RiskLevel.Caution, "Windows Error Reporting service."),
-        ["RetailDemo"] = ("Telemetry", RiskLevel.Safe, "Retail Demo Service, only used on store display units."),
-        ["MapsBroker"] = ("System Utility", RiskLevel.Caution, "Downloaded Maps Manager."),
-        ["XblAuthManager"] = ("Xbox & Gaming", RiskLevel.Caution, "Xbox Live Auth Manager."),
-        ["XblGameSave"] = ("Xbox & Gaming", RiskLevel.Caution, "Xbox Live Game Save."),
-        ["XboxNetApiSvc"] = ("Xbox & Gaming", RiskLevel.Caution, "Xbox Live Networking Service."),
-        ["SysMain"] = ("Performance", RiskLevel.Caution, "Superfetch, preloads apps into memory. Safe to disable on SSDs."),
-        ["Fax"] = ("System Utility", RiskLevel.Safe, "Fax service, unused on most modern PCs."),
-        ["WSearch"] = ("System Utility", RiskLevel.Risky, "Windows Search indexer, disabling slows down file search."),
-        ["PrintNotify"] = ("System Utility", RiskLevel.Caution, "Printer notification service, only needed if you print."),
-        ["RemoteRegistry"] = ("System Utility", RiskLevel.Safe, "Remote registry access, disabled by default and rarely needed."),
-    };
-
-    // Optional Windows features frequently disabled by debloat tools.
-    public static readonly Dictionary<string, (string Category, RiskLevel Risk, string Notes)> KnownOptionalFeatures = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["Internet-Explorer-Optional-amd64"] = ("System Feature", RiskLevel.Safe, "Legacy Internet Explorer engine, replaced by Edge."),
-        ["WorkFolders-Client"] = ("System Feature", RiskLevel.Safe, "Work Folders sync client, rarely used at home."),
-        ["Printing-XPSServices-Features"] = ("System Feature", RiskLevel.Safe, "XPS printing support."),
-        ["MediaPlayback"] = ("System Feature", RiskLevel.Caution, "Media playback support used by several apps."),
-        ["WindowsMediaPlayer"] = ("System Feature", RiskLevel.Safe, "Legacy Windows Media Player."),
-        ["MicrosoftWindowsPowerShellV2"] = ("System Feature", RiskLevel.Risky, "Legacy PowerShell v2 engine, some old scripts may depend on it."),
-        ["TelnetClient"] = ("System Feature", RiskLevel.Safe, "Telnet client, rarely used."),
-        ["TFTP"] = ("System Feature", RiskLevel.Safe, "TFTP client, rarely used."),
-        ["LegacyComponents"] = ("System Feature", RiskLevel.Caution, "Legacy component support for older applications."),
-        ["SMB1Protocol"] = ("System Feature", RiskLevel.Safe, "Legacy and insecure file sharing protocol, safe to disable."),
-        ["Containers-DisposableClientVM"] = ("System Feature", RiskLevel.Caution, "Windows Sandbox, keep if you use isolated test environments."),
-        ["Microsoft-Hyper-V-All"] = ("System Feature", RiskLevel.Risky, "Hyper-V virtualization platform, disabling breaks any VMs and some emulators/containers."),
-        ["NetFx3"] = ("System Feature", RiskLevel.Caution, ".NET Framework 3.5, required by some older applications and games."),
-        ["Printing-PrintToPDFServices-Features"] = ("System Feature", RiskLevel.Safe, "Microsoft Print to PDF driver."),
-    };
+    private static CatalogEntry? FindMatch(IEnumerable<CatalogEntry> entries, string value)
+        => entries.FirstOrDefault(entry => FileSystemName.MatchesSimpleExpression(entry.Pattern, value, ignoreCase: true));
 }

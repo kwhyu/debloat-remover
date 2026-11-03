@@ -7,6 +7,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{819F5C7F-796
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DebloatManager", "src\DebloatManager\DebloatManager.csproj", "{9C286702-5BCE-4682-8786-7FECCD7065FA}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{341CF4C8-5114-4927-AF28-183A75F956BE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DebloatManager.Tests", "tests\DebloatManager.Tests\DebloatManager.Tests.csproj", "{EA498258-1F74-4EA3-995E-131D7D131F5E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,8 +24,13 @@ Global
 		{9C286702-5BCE-4682-8786-7FECCD7065FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9C286702-5BCE-4682-8786-7FECCD7065FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9C286702-5BCE-4682-8786-7FECCD7065FA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EA498258-1F74-4EA3-995E-131D7D131F5E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EA498258-1F74-4EA3-995E-131D7D131F5E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EA498258-1F74-4EA3-995E-131D7D131F5E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EA498258-1F74-4EA3-995E-131D7D131F5E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{9C286702-5BCE-4682-8786-7FECCD7065FA} = {819F5C7F-796D-46A0-B7CF-D91EAC50A7F0}
+		{EA498258-1F74-4EA3-995E-131D7D131F5E} = {341CF4C8-5114-4927-AF28-183A75F956BE}
 	EndGlobalSection
 EndGlobal
