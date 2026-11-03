@@ -80,7 +80,7 @@ This section is for the maintainer.
 1. Update `<Version>` in `src/DebloatManager/DebloatManager.csproj` and add a `CHANGELOG.md` entry.
 2. Complete the virtual machine checks above on the `snapshot` branch.
 3. Open a pull request from `snapshot` into `main` and merge it.
-3. Run `installer\build-installer.ps1`.
+4. Run `installer\build-installer.ps1` from `main`.
 5. Create a GitHub release tagged `v<version>` and attach these files from `publish\`, using exactly these names:
    - `DebloatManagerSetup.msi`
    - `DebloatManagerSetup.msi.sha256`
