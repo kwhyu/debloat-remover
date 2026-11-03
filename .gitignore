@@ -10,3 +10,5 @@ publish/
 installer/*.wixpdb
 installer/bin/
 installer/obj/
+installer/obj/
+TestResults/

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -7,11 +7,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <AssemblyName>DebloatManager</AssemblyName>
     <RootNamespace>DebloatManager</RootNamespace>
-    <ApplicationTitle>DebloatManager</ApplicationTitle>
     <NeutralLanguage>en</NeutralLanguage>
-    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Version>1.1.0</Version>
+    <Product>DebloatManager</Product>
+    <Authors>kwhyu</Authors>
+    <Copyright>Copyright (c) 2026 kwhyu and DebloatManager contributors</Copyright>
+    <RepositoryUrl>https://github.com/kwhyu/debloat-remover</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,6 +26,12 @@
 
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
+    <EmbeddedResource Include="..\..\RISKS.md" LogicalName="Legal.RISKS.md" />
+    <EmbeddedResource Include="..\..\EULA.md" LogicalName="Legal.EULA.md" />
+    <EmbeddedResource Include="..\..\TERMS.md" LogicalName="Legal.TERMS.md" />
+    <EmbeddedResource Include="..\..\PRIVACY.md" LogicalName="Legal.PRIVACY.md" />
+    <EmbeddedResource Include="..\..\LICENSE" LogicalName="Legal.LICENSE" />
+    <EmbeddedResource Include="..\..\THIRD-PARTY-NOTICES.md" LogicalName="Legal.THIRD-PARTY-NOTICES.md" />
   </ItemGroup>
 
 </Project>

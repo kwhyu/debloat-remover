@@ -1,392 +1,249 @@
-using System.Diagnostics;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using DebloatManager.Models;
-using Microsoft.Win32;
 
 namespace DebloatManager.Services;
 
 public sealed class AppScannerService
 {
+    public const string StoreAppsScript = """
+        $provisioned = @{}
+        try { Get-AppxProvisionedPackage -Online | ForEach-Object { $provisioned[$_.DisplayName] = $true } } catch { }
+        try { $apps = Get-AppxPackage -AllUsers -ErrorAction Stop } catch { $apps = Get-AppxPackage }
+        $result = foreach ($app in ($apps | Where-Object { -not $_.IsFramework -and -not $_.IsResourcePackage })) {
+            $users = @($app.PackageUserInformation)
+            $active = $users.Count -eq 0
+            foreach ($user in $users) {
+                if (@('Staged', 'NotInstalled') -notcontains "$($user.InstallState)") { $active = $true }
+            }
+            [PSCustomObject]@{
+                Name = $app.Name
+                Publisher = $app.Publisher
+                PublisherDisplayName = $(try { ([xml](Get-Content -LiteralPath (Join-Path $app.InstallLocation 'AppxManifest.xml') -Raw -ErrorAction Stop)).Package.Properties.PublisherDisplayName } catch { $null })
+                Version = "$($app.Version)"
+                NonRemovable = [bool]$app.NonRemovable
+                InstallLocation = $app.InstallLocation
+                SignatureKind = "$($app.SignatureKind)"
+                Present = ($active -or $provisioned.ContainsKey($app.Name))
+            }
+        }
+        ConvertTo-Json -InputObject @($result) -Compress -Depth 3
+        """;
+
+    public const string FeaturesScript = """
+        $enabled = @(Get-WindowsOptionalFeature -Online | Where-Object { "$($_.State)" -eq 'Enabled' } | ForEach-Object { "$($_.FeatureName)" })
+        ConvertTo-Json -InputObject $enabled -Compress
+        """;
+
+    public const string ServicesScriptBody = """
+        $result = foreach ($service in (Get-Service -Name $names -ErrorAction SilentlyContinue)) {
+            [PSCustomObject]@{ Name = $service.Name; StartType = "$($service.StartType)" }
+        }
+        ConvertTo-Json -InputObject @($result) -Compress
+        """;
+
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    public static string ServicesScript()
+    {
+        var names = string.Join(",", BloatwareCatalog.Services.Keys.Select(PowerShellRunner.Quote));
+        return $"$names = @({names})\n{ServicesScriptBody}";
+    }
 
     public async Task<List<AppItem>> ScanAllAsync(IProgress<string>? progress = null)
     {
         var items = new List<AppItem>();
-        var uwpApps = new List<AppItem>();
 
-        await RunStepAsync("UWP apps", progress, async () =>
+        await RunStepAsync("Store apps", items, progress, ScanStoreAppsAsync);
+        await RunStepAsync("programs", items, progress, () => Task.Run(ScanPrograms));
+        await RunStepAsync("Windows features", items, progress, ScanFeaturesAsync);
+        await RunStepAsync("services", items, progress, ScanServicesAsync);
+
+        return items;
+    }
+
+    public static List<AppItem> ScanPrograms()
+    {
+        var entries = InstalledProgramRegistry.ReadAll()
+            .Where(entry => !entry.IsHidden && !string.IsNullOrWhiteSpace(entry.DisplayName))
+            .Where(entry => !entry.DisplayName!.Equals("DebloatManager", StringComparison.OrdinalIgnoreCase))
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.UninstallCommand) || entry.IsWindowsInstaller);
+
+        return entries
+            .AsParallel()
+            .WithDegreeOfParallelism(Math.Max(2, Environment.ProcessorCount / 2))
+            .Select(BuildProgram)
+            .ToList();
+    }
+
+    private static AppItem BuildProgram(UninstallEntry entry)
+    {
+        var signature = ProgramFileLocator.InspectBestFile(entry);
+        var publisher = entry.Publisher == "Unknown" && signature.Signer is not null ? signature.Signer : entry.Publisher;
+        var match = BloatwareCatalog.ClassifyProgram(entry.DisplayName!, publisher);
+
+        return new AppItem
         {
-            uwpApps = await ScanUwpAppsAsync(progress);
-            items.AddRange(uwpApps);
-        });
+            Name = entry.DisplayName!,
+            Identifier = entry.KeyName,
+            Type = AppType.Win32App,
+            Publisher = publisher,
+            Version = entry.Version,
+            Risk = match?.Risk ?? RiskLevel.Unknown,
+            Category = match?.Category ?? "Third-party program",
+            Notes = match?.Notes ?? string.Empty,
+            Origin = signature.Status,
+            Signer = signature.Signer,
+            SignatureProblem = signature.Problem,
+            Website = entry.Website,
+            InstallDate = entry.InstallDate,
+            InstallLocation = entry.InstallLocation,
+            UninstallCommand = entry.UninstallCommand,
+            IsWindowsInstaller = entry.IsWindowsInstaller,
+            UninstallHive = entry.Hive,
+            UninstallKeyPath = entry.KeyPath
+        };
+    }
 
-        await RunStepAsync("provisioned packages", progress, async () => await MarkProvisionedAsync(uwpApps, progress));
+    public static List<AppItem> BuildStoreApps(IEnumerable<StoreAppRecord> records)
+    {
+        var items = new List<AppItem>();
 
-        await RunStepAsync("installed programs", progress, () =>
+        foreach (var group in records.Where(r => !string.IsNullOrWhiteSpace(r.Name) && r.Present)
+                     .GroupBy(r => r.Name!, StringComparer.OrdinalIgnoreCase))
         {
-            var win32Apps = ScanWin32Apps().ToList();
-            items.AddRange(win32Apps);
-            progress?.Report($"Found {win32Apps.Count} installed programs.");
-            return Task.CompletedTask;
-        });
+            var record = group.First();
+            var publisher = ChoosePublisher(record.PublisherDisplayName, record.Publisher);
+            var nonRemovable = group.Any(r => r.NonRemovable);
+            var match = BloatwareCatalog.ClassifyStoreApp(group.Key, publisher, nonRemovable, record.SignatureKind);
 
-        await RunStepAsync("Windows optional features", progress, async () => items.AddRange(await ScanOptionalFeaturesAsync(progress)));
-
-        await RunStepAsync("background services", progress, async () => items.AddRange(await ScanServicesAsync(progress)));
-
-        try
-        {
-            progress?.Report("Matching running processes...");
-            MatchRunningProcesses(items);
-        }
-        catch (Exception ex)
-        {
-            progress?.Report($"Process matching failed: {ex.Message}");
+            items.Add(new AppItem
+            {
+                Name = match?.DisplayName ?? group.Key,
+                Identifier = group.Key,
+                Type = AppType.UwpApp,
+                Publisher = publisher,
+                Version = record.Version ?? "-",
+                Risk = match?.Risk ?? RiskLevel.Unknown,
+                Category = match?.Category ?? "Third-party app",
+                Notes = match?.Notes ?? string.Empty,
+                Origin = OriginOfPackage(record.SignatureKind),
+                Signer = ExtractPublisher(record.Publisher) is var signer && signer != "Unknown" ? signer : null,
+                InstallLocation = record.InstallLocation
+            });
         }
 
         return items;
     }
 
-    // Runs one scan step in isolation so a failure there (bad PowerShell output, JSON
-    // shape mismatch, etc.) cannot discard results already found by other steps.
-    private static async Task RunStepAsync(string stepName, IProgress<string>? progress, Func<Task> step)
+    public static OriginStatus OriginOfPackage(string? signatureKind) => signatureKind switch
     {
+        "System" => OriginStatus.Windows,
+        "Store" => OriginStatus.Store,
+        "Developer" or "Enterprise" => OriginStatus.Signed,
+        "None" => OriginStatus.Unsigned,
+        _ => OriginStatus.NotChecked
+    };
+
+    public static string ChoosePublisher(string? manifestName, string? distinguishedName)
+        => !string.IsNullOrWhiteSpace(manifestName) && !manifestName.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase)
+            ? manifestName
+            : ExtractPublisher(distinguishedName);
+
+    public static string ExtractPublisher(string? distinguishedName)
+    {
+        var commonName = distinguishedName?.Split(',')
+            .Select(part => part.Trim())
+            .FirstOrDefault(part => part.StartsWith("CN=", StringComparison.OrdinalIgnoreCase))?[3..];
+
+        return string.IsNullOrWhiteSpace(commonName) || Guid.TryParse(commonName, out _) ? "Unknown" : commonName;
+    }
+
+    private static async Task RunStepAsync(string label, List<AppItem> items, IProgress<string>? progress, Func<Task<List<AppItem>>> step)
+    {
+        progress?.Report($"Scanning {label}...");
         try
         {
-            await step();
+            var found = await step();
+            items.AddRange(found);
+            progress?.Report($"Found {found.Count} {label}.");
         }
         catch (Exception ex)
         {
-            progress?.Report($"Skipped {stepName} due to an error: {ex.Message}");
+            progress?.Report($"Could not scan {label}: {ex.Message}");
         }
     }
 
-    private async Task<List<AppItem>> ScanUwpAppsAsync(IProgress<string>? progress)
+    private static async Task<List<AppItem>> ScanStoreAppsAsync()
     {
-        // Get-AppxPackage without -AllUsers can return an empty result when the process is
-        // elevated (a known Windows quirk), so prefer -AllUsers since this app always runs
-        // as Administrator, and fall back to the per-user query if that is unavailable.
-        const string script = """
-        try {
-            $apps = Get-AppxPackage -AllUsers -ErrorAction Stop
-        } catch {
-            $apps = Get-AppxPackage
-        }
-        $apps = $apps | Where-Object { -not $_.IsFramework -and -not $_.IsResourcePackage }
-        $result = foreach ($app in $apps) {
-            [PSCustomObject]@{
-                Name = $app.Name
-                PackageFullName = $app.PackageFullName
-                PackageFamilyName = $app.PackageFamilyName
-                Publisher = $app.Publisher
-                Version = $app.Version.ToString()
-                NonRemovable = [bool]$app.NonRemovable
-                InstallLocation = $app.InstallLocation
-                SignatureKind = $app.SignatureKind.ToString()
-            }
-        }
-        @($result) | ConvertTo-Json -Compress -Depth 3
-        """;
-
-        var (success, output, error) = await PowerShellRunner.RunScriptAsync(script);
-        if (!success)
-        {
-            progress?.Report($"UWP app scan failed: {(string.IsNullOrWhiteSpace(error) ? "unknown PowerShell error" : error)}");
-            return new List<AppItem>();
-        }
-
-        if (string.IsNullOrWhiteSpace(output))
-        {
-            progress?.Report("UWP app scan returned no packages.");
-            return new List<AppItem>();
-        }
-
-        var dtos = JsonSerializer.Deserialize<List<UwpAppDto>>(output, JsonOptions) ?? new();
-        var result = new List<AppItem>();
-
-        foreach (var dto in dtos)
-        {
-            if (string.IsNullOrWhiteSpace(dto.Name)) continue;
-
-            var identifier = dto.PackageFamilyName ?? dto.Name;
-            var publisherName = ExtractCommonName(dto.Publisher) ?? "Microsoft Corporation";
-            var catalogMatch = BloatwareCatalog.Match(identifier) ?? BloatwareCatalog.Match(dto.Name)
-                ?? BloatwareCatalog.ClassifyUwpFallback(dto.Name, publisherName, dto.NonRemovable, dto.SignatureKind);
-
-            result.Add(new AppItem
-            {
-                Name = dto.Name,
-                Publisher = publisherName,
-                Version = dto.Version ?? "-",
-                Type = AppType.UwpApp,
-                Risk = catalogMatch?.Risk ?? RiskLevel.Unknown,
-                Category = catalogMatch?.Category ?? "Uncategorized UWP App",
-                Notes = catalogMatch?.Notes ?? string.Empty,
-                PackageFullName = dto.PackageFullName,
-                PackageFamilyName = dto.PackageFamilyName,
-                NonRemovable = dto.NonRemovable,
-                InstallLocation = dto.InstallLocation
-            });
-        }
-
-        progress?.Report($"Found {result.Count} UWP apps.");
-        return result;
+        var output = await RunForOutputAsync(StoreAppsScript);
+        return BuildStoreApps(JsonSerializer.Deserialize<List<StoreAppRecord>>(output, JsonOptions) ?? new());
     }
 
-    private async Task MarkProvisionedAsync(List<AppItem> uwpApps, IProgress<string>? progress)
+    private static async Task<List<AppItem>> ScanFeaturesAsync()
     {
-        const string script = """
-        @(Get-AppxProvisionedPackage -Online | Select-Object DisplayName, PackageName) | ConvertTo-Json -Compress
-        """;
+        var output = await RunForOutputAsync(FeaturesScript);
+        var enabled = JsonSerializer.Deserialize<List<string>>(output, JsonOptions) ?? new();
 
-        var (success, output, error) = await PowerShellRunner.RunScriptAsync(script);
-        if (!success)
-        {
-            progress?.Report($"Provisioned package scan skipped: {(string.IsNullOrWhiteSpace(error) ? "unknown PowerShell error" : error)}");
-            return;
-        }
-        if (string.IsNullOrWhiteSpace(output)) return;
-
-        var dtos = JsonSerializer.Deserialize<List<ProvisionedDto>>(output, JsonOptions) ?? new();
-        var provisionedNames = dtos.Select(d => d.PackageName).Where(n => n is not null).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var app in uwpApps)
-        {
-            if (app.PackageFullName is not null && provisionedNames.Contains(app.PackageFullName))
-            {
-                app.IsProvisioned = true;
-            }
-        }
+        return enabled
+            .Where(BloatwareCatalog.Features.ContainsKey)
+            .Select(name => BuildSystemItem(name, BloatwareCatalog.Features[name], AppType.SystemFeature, "Enabled"))
+            .ToList();
     }
 
-    private static IEnumerable<AppItem> ScanWin32Apps()
+    private static async Task<List<AppItem>> ScanServicesAsync()
     {
-        var roots = new (RegistryKey Hive, string Path)[]
-        {
-            (Registry.LocalMachine, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-            (Registry.LocalMachine, @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-            (Registry.CurrentUser, @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-        };
+        var output = await RunForOutputAsync(ServicesScript());
+        var services = JsonSerializer.Deserialize<List<ServiceRecord>>(output, JsonOptions) ?? new();
 
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var (hive, path) in roots)
-        {
-            using var uninstallKey = hive.OpenSubKey(path);
-            if (uninstallKey is null) continue;
-
-            foreach (var subKeyName in uninstallKey.GetSubKeyNames())
+        return services
+            .Where(service => service.Name is not null && BloatwareCatalog.Services.ContainsKey(service.Name))
+            .Select(service =>
             {
-                using var subKey = uninstallKey.OpenSubKey(subKeyName);
-                if (subKey is null) continue;
-
-                var displayName = subKey.GetValue("DisplayName") as string;
-                if (string.IsNullOrWhiteSpace(displayName)) continue;
-                if (!seen.Add(displayName)) continue;
-
-                if (subKey.GetValue("SystemComponent") is int systemComponent && systemComponent == 1) continue;
-
-                var releaseType = subKey.GetValue("ReleaseType") as string;
-                if (releaseType is "Hotfix" or "Update" or "Security Update" or "ServicePack") continue;
-
-                var quietUninstall = subKey.GetValue("QuietUninstallString") as string;
-                var uninstallString = quietUninstall ?? subKey.GetValue("UninstallString") as string;
-                var publisher = subKey.GetValue("Publisher") as string ?? "Unknown";
-                var version = subKey.GetValue("DisplayVersion") as string ?? "-";
-                var installLocation = subKey.GetValue("InstallLocation") as string;
-
-                var catalogMatch = BloatwareCatalog.Match(displayName) ?? BloatwareCatalog.Match(publisher)
-                    ?? BloatwareCatalog.ClassifyWin32Fallback(displayName, publisher);
-
-                yield return new AppItem
-                {
-                    Name = displayName,
-                    Publisher = publisher,
-                    Version = version,
-                    Type = AppType.Win32App,
-                    Risk = catalogMatch?.Risk ?? RiskLevel.Unknown,
-                    Category = catalogMatch?.Category ?? "Third-Party Application",
-                    Notes = catalogMatch?.Notes ?? string.Empty,
-                    UninstallCommand = uninstallString,
-                    UninstallIsQuiet = quietUninstall is not null,
-                    InstallLocation = installLocation
-                };
-            }
-        }
+                var disabled = string.Equals(service.StartType, "Disabled", StringComparison.OrdinalIgnoreCase);
+                var item = BuildSystemItem(service.Name!, BloatwareCatalog.Services[service.Name!], AppType.BackgroundService, disabled ? "Disabled" : "Enabled");
+                item.IsRemoved = disabled;
+                return item;
+            })
+            .ToList();
     }
 
-    private async Task<List<AppItem>> ScanOptionalFeaturesAsync(IProgress<string>? progress)
+    private static AppItem BuildSystemItem(string identifier, SystemEntry entry, AppType type, string status) => new()
     {
-        const string script = """
-        @(Get-WindowsOptionalFeature -Online | Where-Object { $_.State -eq 'Enabled' } | Select-Object FeatureName, DisplayName) | ConvertTo-Json -Compress
-        """;
+        Name = entry.DisplayName,
+        Identifier = identifier,
+        Type = type,
+        Publisher = "Microsoft Corporation",
+        Risk = entry.Risk,
+        Category = entry.Category,
+        Notes = entry.Notes,
+        Origin = OriginStatus.Windows,
+        Status = status
+    };
 
-        var (success, output, error) = await PowerShellRunner.RunScriptAsync(script);
-        if (!success)
-        {
-            progress?.Report($"Optional feature scan failed: {(string.IsNullOrWhiteSpace(error) ? "unknown PowerShell error" : error)}");
-            return new List<AppItem>();
-        }
-        if (string.IsNullOrWhiteSpace(output)) return new List<AppItem>();
-
-        var dtos = JsonSerializer.Deserialize<List<OptionalFeatureDto>>(output, JsonOptions) ?? new();
-        var result = new List<AppItem>();
-
-        foreach (var dto in dtos)
-        {
-            if (string.IsNullOrWhiteSpace(dto.FeatureName)) continue;
-            if (!BloatwareCatalog.KnownOptionalFeatures.TryGetValue(dto.FeatureName, out var known)) continue;
-
-            result.Add(new AppItem
-            {
-                Name = dto.DisplayName ?? dto.FeatureName,
-                Publisher = "Microsoft Corporation",
-                Type = AppType.SystemFeature,
-                Risk = known.Risk,
-                Category = known.Category,
-                Notes = known.Notes,
-                FeatureName = dto.FeatureName
-            });
-        }
-
-        return result;
-    }
-
-    private async Task<List<AppItem>> ScanServicesAsync(IProgress<string>? progress)
+    private static async Task<string> RunForOutputAsync(string script)
     {
-        var names = string.Join(",", BloatwareCatalog.KnownServices.Keys.Select(n => $"'{n}'"));
-        var script = $$$"""
-        @(Get-Service -Name {{{names}}} -ErrorAction SilentlyContinue | Select-Object Name, DisplayName, @{Name='Status';Expression={$_.Status.ToString()}}) | ConvertTo-Json -Compress
-        """;
+        var result = await PowerShellRunner.RunAsync(script);
+        if (!result.Success) throw new InvalidOperationException(result.FailureText("PowerShell reported an error."));
 
-        var (success, output, error) = await PowerShellRunner.RunScriptAsync(script);
-        if (!success)
-        {
-            progress?.Report($"Service scan failed: {(string.IsNullOrWhiteSpace(error) ? "unknown PowerShell error" : error)}");
-            return new List<AppItem>();
-        }
-        if (string.IsNullOrWhiteSpace(output)) return new List<AppItem>();
-
-        var dtos = JsonSerializer.Deserialize<List<ServiceDto>>(output, JsonOptions) ?? new();
-        var result = new List<AppItem>();
-
-        foreach (var dto in dtos)
-        {
-            if (string.IsNullOrWhiteSpace(dto.Name)) continue;
-            if (!BloatwareCatalog.KnownServices.TryGetValue(dto.Name, out var known)) continue;
-
-            var isRunning = string.Equals(dto.Status, "Running", StringComparison.OrdinalIgnoreCase);
-
-            result.Add(new AppItem
-            {
-                Name = dto.DisplayName ?? dto.Name,
-                Publisher = "Microsoft Corporation",
-                Type = AppType.BackgroundService,
-                Risk = known.Risk,
-                Category = known.Category,
-                Notes = known.Notes,
-                ServiceName = dto.Name,
-                IsRunning = isRunning,
-                Status = isRunning ? "Running" : "Stopped"
-            });
-        }
-
-        return result;
+        var lastLine = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+        return string.IsNullOrWhiteSpace(lastLine) ? "[]" : lastLine;
     }
 
-    private static void MatchRunningProcesses(List<AppItem> items)
-    {
-        var pathsByPid = new List<(int Pid, string Path)>();
-
-        foreach (var process in Process.GetProcesses())
-        {
-            try
-            {
-                var path = process.MainModule?.FileName;
-                if (!string.IsNullOrEmpty(path))
-                {
-                    pathsByPid.Add((process.Id, path));
-                }
-            }
-            catch
-            {
-                // Access denied on protected/system processes, skip them.
-            }
-            finally
-            {
-                process.Dispose();
-            }
-        }
-
-        foreach (var item in items)
-        {
-            if (item.Type == AppType.UwpApp && !string.IsNullOrEmpty(item.PackageFamilyName))
-            {
-                foreach (var (pid, path) in pathsByPid)
-                {
-                    if (path.Contains(item.PackageFamilyName!, StringComparison.OrdinalIgnoreCase))
-                    {
-                        item.ProcessIds.Add(pid);
-                    }
-                }
-            }
-            else if (item.Type == AppType.Win32App && !string.IsNullOrEmpty(item.InstallLocation))
-            {
-                foreach (var (pid, path) in pathsByPid)
-                {
-                    if (path.StartsWith(item.InstallLocation!, StringComparison.OrdinalIgnoreCase))
-                    {
-                        item.ProcessIds.Add(pid);
-                    }
-                }
-            }
-
-            if (item.ProcessIds.Count > 0)
-            {
-                item.IsRunning = true;
-                item.Status = "Running";
-            }
-        }
-    }
-
-    private static string? ExtractCommonName(string? distinguishedName)
-    {
-        if (string.IsNullOrWhiteSpace(distinguishedName)) return null;
-
-        var parts = distinguishedName.Split(',');
-        var cn = parts.FirstOrDefault(p => p.TrimStart().StartsWith("CN=", StringComparison.OrdinalIgnoreCase));
-        return cn?.Trim()[3..];
-    }
-
-    private sealed class UwpAppDto
+    public sealed class StoreAppRecord
     {
         public string? Name { get; set; }
-        public string? PackageFullName { get; set; }
-        public string? PackageFamilyName { get; set; }
         public string? Publisher { get; set; }
+        public string? PublisherDisplayName { get; set; }
         public string? Version { get; set; }
         public bool NonRemovable { get; set; }
         public string? InstallLocation { get; set; }
         public string? SignatureKind { get; set; }
+        public bool Present { get; set; } = true;
     }
 
-    private sealed class ProvisionedDto
-    {
-        public string? DisplayName { get; set; }
-        public string? PackageName { get; set; }
-    }
-
-    private sealed class OptionalFeatureDto
-    {
-        public string? FeatureName { get; set; }
-        public string? DisplayName { get; set; }
-    }
-
-    private sealed class ServiceDto
+    private sealed class ServiceRecord
     {
         public string? Name { get; set; }
-        public string? DisplayName { get; set; }
-        public string? Status { get; set; }
+        public string? StartType { get; set; }
     }
 }

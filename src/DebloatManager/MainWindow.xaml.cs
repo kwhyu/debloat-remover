@@ -9,6 +9,9 @@ public partial class MainWindow : FluentWindow
     public MainWindow()
     {
         InitializeComponent();
-        DataContext = new MainViewModel(new WpfDialogService());
+
+        var viewModel = new MainViewModel(new WpfDialogService());
+        DataContext = viewModel;
+        Loaded += (_, _) => viewModel.ScanCommand.Execute(null);
     }
 }

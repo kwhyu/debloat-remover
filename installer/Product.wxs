@@ -1,29 +1,39 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="DebloatManager"
-           Manufacturer="DebloatManager"
-           Version="1.0.0"
+           Manufacturer="kwhyu"
+           Version="$(var.ProductVersion)"
            UpgradeCode="50F26C5B-97EC-43F0-8ECB-FB522164FB4E"
            Compressed="yes">
 
-    <SummaryInformation Description="DebloatManager Setup" Manufacturer="DebloatManager" />
+    <SummaryInformation Description="DebloatManager Setup" Manufacturer="kwhyu" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of DebloatManager is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Icon Id="AppIcon" SourceFile="..\src\DebloatManager\Assets\app.ico" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
     <Property Id="ARPNOREPAIR" Value="yes" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/kwhyu/debloat-remover" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/kwhyu/debloat-remover/issues" />
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="DebloatManager">
-        <Component Id="MainExecutable" Guid="*">
+        <Component Id="MainExecutable">
           <File Id="DebloatManagerExe" Source="..\publish\win-x64\DebloatManager.exe" KeyPath="yes">
             <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="DebloatManager"
                       WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
             <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="DebloatManager"
                       WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
           </File>
+        </Component>
+        <Component Id="LegalDocuments" Guid="7C1F4A52-3B8E-4D6A-9F21-6E0A5D3C8B14">
+          <File Id="LicenseFile" Source="..\LICENSE" Name="LICENSE.txt" KeyPath="yes" />
+          <File Id="EulaFile" Source="..\EULA.md" />
+          <File Id="TermsFile" Source="..\TERMS.md" />
+          <File Id="PrivacyFile" Source="..\PRIVACY.md" />
+          <File Id="RisksFile" Source="..\RISKS.md" />
+          <File Id="NoticesFile" Source="..\THIRD-PARTY-NOTICES.md" />
         </Component>
       </Directory>
     </StandardDirectory>
@@ -33,9 +43,12 @@
 
     <Feature Id="MainFeature" Title="DebloatManager" Level="1">
       <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="LegalDocuments" />
     </Feature>
 
     <ui:WixUI Id="WixUI_InstallDir" />
-    <WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+    <WixVariable Id="WixUILicenseRtf" Value="obj\EULA.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="obj\banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="obj\dialog.bmp" />
   </Package>
 </Wix>
