@@ -1,15 +1,16 @@
-# Allows pull requests into main only from the snapshot branch of this repository.
+# Checks the source branch of every pull request into main or snapshot.
 name: Branch flow
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, snapshot]
 
 permissions: {}
 
 jobs:
   source-branch:
     name: Source branch check
+    if: github.base_ref == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Require snapshot as the source
@@ -22,3 +23,20 @@ jobs:
             echo "::error::Pull requests into main must come from the snapshot branch of this repository."
             exit 1
           fi
+
+  branch-name:
+    name: Branch name check
+    if: github.base_ref == 'snapshot'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a feature or bugfix branch
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          case "$HEAD_REF" in
+            feature/?*|bugfix/?*) ;;
+            *)
+              echo "::error::Pull requests into snapshot must come from a feature/ or bugfix/ branch."
+              exit 1
+              ;;
+          esac
