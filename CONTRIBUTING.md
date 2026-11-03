@@ -29,13 +29,13 @@ your branch  ->  snapshot  ->  main
 
 - `main` holds released code. It only accepts pull requests from `snapshot`.
 - `snapshot` collects changes that are being prepared for release. It only accepts pull requests.
-- Your work goes on a new branch, such as `feature/short-name` or `fix/short-name`.
+- Your work goes on a new branch named `feature/short-name` for new work or `bugfix/short-name` for fixes.
 
 Direct pushes to `main` and `snapshot` are blocked.
 
 ## Pull requests
 
-1. Fork the repository and create a branch from `snapshot`.
+1. Fork the repository and create a `feature/` or `bugfix/` branch from `snapshot`.
 2. Keep the change small and focused on one thing.
 3. Run `dotnet test`, and make sure it passes.
 4. For any change to removal behavior, complete the virtual machine checks below.
